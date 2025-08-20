@@ -240,7 +240,17 @@ for wkn, g in df.groupby("WKN"):
         )
 
     # --- Speichern ---
-    dateiname = f"{heute}_WKN{wkn}.png"
+    # --- Dateiname zusammensetzen ---
+    # letztes Datum im Datensatz
+    last_date = g[haupt_datum].max()
+    last_date_str = last_date.strftime("%d.%m.%Y") if pd.notna(last_date) else "NA"
+
+    # aktuelles Datum (ohne Punkte) und Uhrzeit
+    now = datetime.now()
+    today_str = now.strftime("%d%m%Y")  # z.B. 20082025
+    time_str = now.strftime("%H%M%S")  # z.B. 155016
+
+    dateiname = f"{wkn}_{last_date_str}_Bollinger_Shot_{today_str}_{time_str}.png"
     plt.savefig(os.path.join(ziel_ordner, dateiname), dpi=150)
     plt.close()
 
