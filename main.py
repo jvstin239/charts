@@ -28,6 +28,7 @@ CLR_VOL_R = "#d62728"
 
 linienstile = {
     "Schlusskurs":     {"linestyle": "-",  "linewidth": 2.2, "color": CLR_PRICE},
+    "Schlusskurs Regr.": {"linestyle": "--", "linewidth": 2.0, "color": "#1f77b4", "alpha": 0.9},
     "Mean_20":         {"linestyle": "--", "linewidth": 1.6, "color": CLR_MEAN},
     "Bollinger_upper": {"linestyle": "-",  "linewidth": 1.2, "color": CLR_BUP},
     "Bollinger_lower": {"linestyle": "-",  "linewidth": 1.2, "color": CLR_BLOW},
@@ -50,12 +51,23 @@ dezimal_spalten = [
 # ==============================
 # Hilfsfunktionen
 # ==============================
+#def datei_auswaehlen():
+#    root = tk.Tk(); root.withdraw()
+#    return filedialog.askopenfilename(
+#        title="CSV-Datei auswählen",
+#        filetypes=[("CSV-Dateien", "*.csv"), ("Alle Dateien", "*.*")]
+#        initialdir = r"\\Master\F\User\Microsoft Excel\Privat\Börse\CSV-Dateien-Python-Einlesungen\chart Bollinger"
+#    )
+
 def datei_auswaehlen():
-    root = tk.Tk(); root.withdraw()
-    return filedialog.askopenfilename(
-        title="CSV-Datei auswählen",
-        filetypes=[("CSV-Dateien", "*.csv"), ("Alle Dateien", "*.*")]
-    )
+    # CSV-Dateien direkt aus fixem Verzeichnis laden
+     start_dir = r"\\Master\F\User\Microsoft Excel\Privat\Börse\CSV-Dateien-Python-Einlesungen\chart Bollinger"
+     return filedialog.askopenfilename(
+         title="CSV-Datei auswählen",
+         initialdir=start_dir,
+         filetypes=[("CSV-Dateien", "*.csv"), ("Alle Dateien", "*.*")]
+        )
+
 
 def plot_serie(ax, data, value_col, label=None, style=None):
     """Plottet eine Serie gegen die EINZIGE Datumsspalte und gibt y-Werte zurück (für min/max)."""
@@ -105,14 +117,20 @@ df[haupt_datum] = parsed
 # ==============================
 # Zielordner wählen
 # ==============================
-root = tk.Tk(); root.withdraw()
-ziel_ordner = filedialog.askdirectory(title="Ordner zum Speichern der Charts auswählen")
-if not ziel_ordner:
-    heute = datetime.now().strftime("%Y-%m-%d")
-    ziel_ordner = f"charts_{heute}"
-    os.makedirs(ziel_ordner, exist_ok=True)
+#root = tk.Tk(); root.withdraw()
+#ziel_ordner = filedialog.askdirectory(title="Ordner zum Speichern der Charts auswählen")
+#if not ziel_ordner:
+#    heute = datetime.now().strftime("%Y-%m-%d")
+#    ziel_ordner = f"charts_{heute}"
+#    os.makedirs(ziel_ordner, exist_ok=True)
+
+#heute = datetime.now().strftime("%Y-%m-%d")
+
+ziel_ordner = r"\\Master\F\User\Bilder\Boerse\Charts\WP_Bollinger"
+os.makedirs(ziel_ordner, exist_ok=True)
 
 heute = datetime.now().strftime("%Y-%m-%d")
+
 
 # ==============================
 # Pro WKN Chart erstellen
@@ -134,11 +152,29 @@ for wkn, g in df.groupby("WKN"):
 
     # --- Kurs & Indikatoren ---
     y = plot_serie(ax, g, "Schlusskurs", "Schlusskurs", linienstile["Schlusskurs"])
-    if y is not None: y_for_range.append(y)
+    if y is not None:
+        y_for_range.append(y)
 
+    # --- Regression hinzufügen ---
+    xs = g[haupt_datum].map(datetime.toordinal)
+    ys = g["Schlusskurs"]
+    m = xs.notna() & ys.notna()
+    if m.any():
+        coeffs = np.polyfit(xs[m], ys[m], 1)   # lineare Regression
+        fit = np.polyval(coeffs, xs[m])
+        ax.plot(
+            g[haupt_datum][m], fit,
+            label="Schlusskurs Regr.",
+            **linienstile["Schlusskurs Regr."]
+        )
+        y_for_range.append(pd.Series(fit, index=g[haupt_datum][m]))
+
+    # --- Bollinger Mean 20 ---
     if "Mean_20" in g.columns:
-        y = plot_serie(ax, g, "Mean_20", "Mean 20", linienstile["Mean_20"])
-        if y is not None: y_for_range.append(y)
+        y = plot_serie(ax, g, "Mean_20", "Bollinger Mean 20", linienstile["Mean_20"])
+        if y is not None:
+            y_for_range.append(y)
+
 
     if {"Bollinger_upper","Bollinger_lower"}.issubset(g.columns):
         y = plot_serie(ax, g, "Bollinger_upper", "Bollinger upper", linienstile["Bollinger_upper"])
@@ -173,12 +209,14 @@ for wkn, g in df.groupby("WKN"):
                 y=yval,
                 xmin=xdate,
                 xmax=xs.max(),
-                colors="#777",
-                linestyles="--",
-                linewidth=0.9,
-                alpha=0.6,
+                colors="#555",
+                linestyles="-",
+                linewidth=1.8,
+                alpha=0.8,
                 label="Unterstützung" if xdate == xs[m].iloc[0] else None
             )
+
+
 
     # --- Volumen grün/rot ---
     for col in ['Volumen', 'Schlusskurs', 'Schlusskurs_Vortag']:
@@ -212,7 +250,13 @@ for wkn, g in df.groupby("WKN"):
         axis.spines['right'].set_visible(False)
 
     # --- Manuelle Layout-Anpassung ---
-    fig.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.15, hspace=0.05)
+    #fig.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.15, hspace=0.05)
+    #fig.subplots_adjust(left=0.01, right=0.995, top=0.95, bottom=0.12, hspace=0.05)
+    fig.subplots_adjust(left=0, right=1, top=0.95, bottom=0.12, hspace=0.05)
+
+    # X-Achse exakt auf Datenbereich setzen
+    if not g[haupt_datum].isna().all():
+        ax.set_xlim(g[haupt_datum].min(), g[haupt_datum].max())
 
     # Rechte Y-Achsen (Spiegelung)
     ax_right = ax.twinx()
@@ -247,7 +291,7 @@ for wkn, g in df.groupby("WKN"):
             bbox_to_anchor=(0.5, 0.01),
             ncol=8,
             frameon=True,
-            fontsize=10
+            fontsize=12
         )
 
     # --- Speichern ---
@@ -261,7 +305,7 @@ for wkn, g in df.groupby("WKN"):
     plt.savefig(
         os.path.join(ziel_ordner, dateiname),
         dpi=100,
-        bbox_inches="tight",
-        pad_inches=0
+        bbox_inches="tight",   # optional, sorgt für minimalen Rand
+        pad_inches=0.3         # positiven Abstand einfügen, damit nichts abgeschnitten wird
     )
     plt.close()
