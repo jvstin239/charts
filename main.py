@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.ticker import FuncFormatter
+from matplotlib.ticker import AutoMinorLocator
 from datetime import datetime
 import os
 
@@ -30,11 +31,11 @@ linienstile = {
     "Mean_20":         {"linestyle": "--", "linewidth": 1.6, "color": CLR_MEAN},
     "Bollinger_upper": {"linestyle": "-",  "linewidth": 1.2, "color": CLR_BUP},
     "Bollinger_lower": {"linestyle": "-",  "linewidth": 1.2, "color": CLR_BLOW},
-    "Linie_6":         {"linestyle": "--", "linewidth": 1.0, "color": CLR_LIN},
-    "Linie_8":         {"linestyle": "--", "linewidth": 1.0, "color": CLR_LIN},
-    "Linie_50":        {"linestyle": ":",  "linewidth": 1.2, "color": CLR_LIN},
-    "Linie_100":       {"linestyle": ":",  "linewidth": 1.2, "color": CLR_LIN},
-    "Linie_200":       {"linestyle": "-.", "linewidth": 1.4, "color": CLR_LIN},
+    "Linie_6": {"linestyle": "--", "linewidth": 1.2, "color": "#228B22"},  # kräftiges Grün
+    "Linie_8": {"linestyle": "--", "linewidth": 1.2, "color": "#B22222"},  # Kaminrot (FireBrick)
+    "Linie_50": {"linestyle": ":", "linewidth": 1.4, "color": "#FFD700"},  # Goldgelb
+    "Linie_100": {"linestyle": ":", "linewidth": 1.6, "color": "#FFC300"},  # kräftigeres Gelb
+    "Linie_200": {"linestyle": "-.", "linewidth": 1.8, "color": "#FFA500"},  # Orangegelb (kräftig)
     "Supertrend_up":   {"linestyle": "-",  "linewidth": 1.5, "color": CLR_STUP},
     "Supertrend_down": {"linestyle": "-",  "linewidth": 1.5, "color": CLR_STDN},
 }
@@ -120,7 +121,7 @@ for wkn, g in df.groupby("WKN"):
     g = g.sort_values(haupt_datum)
 
     fig = plt.figure(figsize=(13, 8))
-    # Zwei Zeilen: oben Preis (6 Teile), unten Volumen (1 Teil)
+    # Zwei Zeilen: oben Kurs & Indikatoren (6 Teile), unten Volumen (1 Teil)
     gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[6, 1], hspace=0.04)
     ax  = fig.add_subplot(gs[0, 0])
     axv = fig.add_subplot(gs[1, 0], sharex=ax)
@@ -131,7 +132,7 @@ for wkn, g in df.groupby("WKN"):
 
     y_for_range = []
 
-    # --- Preis & Indikatoren ---
+    # --- Kurs & Indikatoren ---
     y = plot_serie(ax, g, "Schlusskurs", "Schlusskurs", linienstile["Schlusskurs"])
     if y is not None: y_for_range.append(y)
 
@@ -162,96 +163,105 @@ for wkn, g in df.groupby("WKN"):
         y = plot_serie(ax, g, "Supertrend_down", "Supertrend down", linienstile["Supertrend_down"])
         if y is not None: y_for_range.append(y)
 
-    # --- Unterstützungspunkte: vertikale Linien an den Datumspositionen ---
+    # --- Unterstützungslinien ---
     if "Unterstuetzungspunkte" in g.columns:
-        xs = g[haupt_datum]
+        xs = pd.to_datetime(g[haupt_datum])
         ys = g["Unterstuetzungspunkte"]
         m = xs.notna() & ys.notna()
-        x_dates = pd.to_datetime(xs[m]).dropna().unique()
-        for i, xdate in enumerate(sorted(x_dates)):
-            ax.axvline(xdate, color="#777", linestyle="--", linewidth=0.9, alpha=0.6,
-                       label="Unterstützung (Datum)" if i == 0 else None)
-        if m.any():
-            y_for_range.append(ys[m])
+        for xdate, yval in zip(xs[m], ys[m]):
+            ax.hlines(
+                y=yval,
+                xmin=xdate,
+                xmax=xs.max(),
+                colors="#777",
+                linestyles="--",
+                linewidth=0.9,
+                alpha=0.6,
+                label="Unterstützung" if xdate == xs[m].iloc[0] else None
+            )
 
-    # --- Volumen unten ---
-    if "Linie_Volumen_gruen" in g.columns or "Linie_Volumen_rot" in g.columns:
-        xv = g[haupt_datum]
-        vg = g.get("Linie_Volumen_gruen", pd.Series([0]*len(g), index=g.index)).fillna(0)
-        vr = g.get("Linie_Volumen_rot",   pd.Series([0]*len(g), index=g.index)).fillna(0)
+    # --- Volumen grün/rot ---
+    for col in ['Volumen', 'Schlusskurs', 'Schlusskurs_Vortag']:
+        if col in g.columns:
+            g[col] = pd.to_numeric(g[col].astype(str).str.replace(",", ".", regex=False), errors='coerce')
 
-        axv.bar(xv, vg, width=1.0, alpha=0.8, label="Volumen grün", color=CLR_VOL_G)
-        axv.bar(xv, vr, width=1.0, alpha=0.8, label="Volumen rot",  color=CLR_VOL_R, bottom=vg)
+    xv = g[haupt_datum]
+    schlusskurs = g['Schlusskurs']
+    schlusskurs_vortag = g['Schlusskurs_Vortag']
 
-        axv.axhline(0, linewidth=0.8, color="#666", alpha=0.6, linestyle="--")
-        vmax = float((vg + vr).max())
-        if vmax > 0:
-            axv.set_ylim(0, vmax * 1.25)
+    vg = g['Volumen'].where(schlusskurs > schlusskurs_vortag, np.nan)
+    vr = g['Volumen'].where(schlusskurs < schlusskurs_vortag, np.nan)
 
-        def _fmt_vol(x, _pos):
-            axabs = abs(x)
-            if axabs >= 1_000_000_000: return f"{x/1_000_000_000:.1f}B"
-            if axabs >= 1_000_000:     return f"{x/1_000_000:.1f}M"
-            if axabs >= 1_000:         return f"{x/1_000:.1f}k"
-            return f"{x:.0f}"
-        axv.yaxis.set_major_formatter(FuncFormatter(_fmt_vol))
-        axv.set_ylabel("Vol.", fontsize=9, labelpad=4)
+    axv.bar(xv, vg, width=0.9, alpha=0.8, label="Volumen grün", color=CLR_VOL_G)
+    axv.bar(xv, vr, width=0.9, alpha=0.8, label="Volumen rot", color=CLR_VOL_R)
 
     # --- Achsenformatierung ---
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m.%Y"))
     axv.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m.%Y"))
-    plt.setp(ax.get_xticklabels(), visible=False)
-    plt.setp(axv.get_xticklabels(), rotation=45)
-    ax.grid(True, which="major", alpha=0.25)
-    axv.grid(True, which="major", alpha=0.15)
-    for spine in ["top", "right"]:
-        ax.spines[spine].set_visible(False)
-        axv.spines[spine].set_visible(False)
 
-    ax.set_title(f"WKN {wkn} – Kurs & Indikatoren", fontsize=13, pad=8)
-    ax.set_ylabel("Preis")
+    # Datum horizontal ausrichten
+    plt.setp(ax.get_xticklabels(), visible=False)  # obere Achse keine X-Ticks
+    plt.setp(axv.get_xticklabels(), rotation=0, ha='center')  # untere Achse Datum horizontal
 
-    # --- Y-Range korrekt bestimmen (alle relevanten Serien) ---
+    # Gitternetz, Minor-Locator, Spines
+    for axis in [ax, axv]:
+        axis.yaxis.set_minor_locator(AutoMinorLocator())
+        axis.grid(which='major', alpha=0.25)
+        axis.grid(which='minor', alpha=0.15, linestyle='--')
+        axis.spines['top'].set_visible(False)
+        axis.spines['right'].set_visible(False)
+
+    # --- Manuelle Layout-Anpassung ---
+    fig.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.15, hspace=0.05)
+
+    # Rechte Y-Achsen (Spiegelung)
+    ax_right = ax.twinx()
+    axv_right = axv.twinx()
+
+    # Limits von den linken Achsen übernehmen
+    ax_right.set_ylim(ax.get_ylim())
+    axv_right.set_ylim(axv.get_ylim() if y_for_range else axv.get_ylim())
+
+    for orig, twin in [(ax, ax_right), (axv, axv_right)]:
+        twin.set_ylabel(orig.get_ylabel(), rotation=270, labelpad=15)
+        twin.yaxis.set_minor_locator(AutoMinorLocator())
+        twin.tick_params(axis='y', which='both', direction='inout', length=4)
+
+    # --- Y-Range automatisch ---
     if y_for_range:
         y_all = pd.concat(y_for_range, axis=0)
         y_all = y_all[np.isfinite(y_all)]
         if not y_all.empty:
             ymin, ymax = float(y_all.min()), float(y_all.max())
-            if ymin == ymax:
-                pad = 0.05 * (abs(ymin) if ymin != 0 else 1.0)
-            else:
-                pad = (ymax - ymin) * 0.07  # 7% Luft
+            pad = (ymax - ymin) * 0.07 if ymin != ymax else 0.05 * (abs(ymin) if ymin != 0 else 1.0)
             ax.set_ylim(ymin - pad, ymax + pad)
 
-    # ===== Legende UNTER den Grafiken =====
+    # --- Legende unter den Charts ---
     h1, l1 = ax.get_legend_handles_labels()
     h2, l2 = axv.get_legend_handles_labels()
     handles, labels = (h1 + h2, l1 + l2)
-
-    # Platz für Legende unterhalb reservieren (kein tight/constrained layout)
-    fig.subplots_adjust(left=0.08, right=0.98, top=0.92, bottom=0.26, hspace=0.04)
-
     if labels:
         fig.legend(
             handles, labels,
             loc="lower center",
-            bbox_to_anchor=(0.5, 0.03),  # klar UNTER der x-Achse
-            ncol=4, frameon=True
+            bbox_to_anchor=(0.5, 0.01),
+            ncol=8,
+            frameon=True,
+            fontsize=10
         )
 
     # --- Speichern ---
-    # --- Dateiname zusammensetzen ---
-    # letztes Datum im Datensatz
     last_date = g[haupt_datum].max()
     last_date_str = last_date.strftime("%d.%m.%Y") if pd.notna(last_date) else "NA"
-
-    # aktuelles Datum (ohne Punkte) und Uhrzeit
     now = datetime.now()
-    today_str = now.strftime("%d%m%Y")  # z.B. 20082025
-    time_str = now.strftime("%H%M%S")  # z.B. 155016
-
+    today_str = now.strftime("%d%m%Y")
+    time_str = now.strftime("%H%M%S")
+    fig.set_size_inches(19.20, 10.80)
     dateiname = f"{wkn}_{last_date_str}_Bollinger_Shot_{today_str}_{time_str}.png"
-    plt.savefig(os.path.join(ziel_ordner, dateiname), dpi=150)
+    plt.savefig(
+        os.path.join(ziel_ordner, dateiname),
+        dpi=100,
+        bbox_inches="tight",
+        pad_inches=0
+    )
     plt.close()
-
-print(f"Charts gespeichert in: {ziel_ordner}")
